@@ -1,0 +1,276 @@
+<link rel="import" href="../polymer/polymer.html">
+
+<!--
+olos-eq is an eq
+##### Example
+
+
+@element olos-eq
+@blurb 
+@status alpha
+@homepage http://olosmusic.github.io/olos-eq
+-->
+<polymer-element name="olos-eq" attributes="inputAudio filterFreqParam filterQParam gainParam output filterFreq">
+  <template>
+    <link rel="stylesheet" href="olos-eq.css"></link>
+
+
+    <div id="canvas_container" on-mousedown="{{mouseDown}}" on-mouseleave="{{mouseLeave}}" on-mouseenter="{{mouseEnter}}" on-mouseup="{{mouseUp}}" on-mousemove="{{mouseDragged}}">
+
+    </div>
+
+  </template>
+
+  <script src="biquads.js"></script>
+
+  <script>
+
+    // Research
+    // 
+    // http://dsp.stackexchange.com/questions/3091/plotting-the-magnitude-response-of-a-biquad-filter
+    // http://stanford.edu/~boyd/ee102/conv_demo.pdf
+    // If you've got y[t] = a0 x[t] + a1 x[t-1] + a2 x[t-2] - b1 y[t-1] - b2 y[t-2]
+    // then you've got a transfer function in the z-domain: H(z) = (a0 + a1 z^-1 + a2 z^-2) / (1 + b1 z^-1 + b2 z^-2).
+    // You can compute it from a frequency f by substituting z = e^(2*pi*i*f/samplerate),
+    // and then split it in amplitude, |H(z)|, and phase, atan2(im(H(z)), re(H(z)). 
+    // https://ccrma.stanford.edu/~jos/filters/Frequency_Response_Ratio_DTFTs.html
+    // 
+    // http://www.earlevel.com/main/2013/10/13/biquad-calculator-v2/
+    // http://www.earlevel.com/main/2012/11/26/biquad-c-source-code/
+
+    // function getBandPass(filterFreq, Q, length) {
+    //   var buffer = new Float32Array(length);
+    //   var k = 20;
+    //   var wc = 2*Math.PI * filterFreq;
+
+    //   for (var i = 0; i < length; i++) {
+    //     var freq = map(i, 0, buffer.length, 0, audioContext.sampleRate/2);
+    //     console.log(freq);
+    //     buffer[i] = k * freq / (Q / (wc)*(freq*freq) + freq + Q*wc );
+    //   }
+
+    //   return buffer;
+
+    // }
+
+    // function getLowPass(filterFreq, length) {
+    //   var buffer = new Float32Array(length);
+
+    //   for (var i = 0; i < length; i++) {
+    //     var freq = map(i, 0, buffer.length, 0, audioContext.sampleRate/2);
+    //     buffer[i] = 1 - 1/(1 + freq/(2*3.14 * filterFreq));
+    //   }
+
+    //   return buffer;
+    //   // return 1/(1 + 1000/(2*3.14 * filterFreq))
+    // }
+
+    // function getFilter(buffer, length) {
+
+    //   var sampleSize = buffer.length / Math.min(length, buffer.length);
+    //   var sampleStep = ~~(sampleSize / 10) || 1;
+    //   var peaks = new Float32Array(Math.min(length, buffer.length) );
+
+    //   var chan = buffer;
+    //   for (var i = 0; i < length; i++) {
+    //     var start = ~~(i * sampleSize);
+    //     var end = ~~(start + sampleSize);
+    //     var max = 0;
+
+    //     for (var j = start; j < end; j += sampleStep) {
+    //       var value = chan[j];
+    //       if (value > max) {
+    //         max = value;
+    //       } else if (-value > max) {
+    //         max = value;
+    //       }
+    //     }
+    //   peaks[i] = max;
+    //   }
+
+    //   return peaks;
+    // }
+
+    (function(params){
+
+      Polymer('olos-eq', {
+
+        // inputs and outputs
+        inputAudio: null,
+        output: null,
+        frequencyParam: [],
+
+
+        filterFreq: 20,
+        filterType: 'lowpass',
+        Q: 10,
+        filterGain: 1,
+        plotMode: 'logarithmic',
+
+        // p5 sketch
+        _sketch: null,
+        plotGainMin: -140,
+        plotGainMax: 40,
+
+        publicMethods: ['set'],
+
+        rootfolder: '../olos-eq/',
+
+        ready: function() {
+          var self = this;
+          self._audioContext = audioContext;
+
+          self.playing = false;
+
+          self.inputAudio = self.biquad = self.output = audioContext.createBiquadFilter();
+
+          self.set();
+        },
+
+        domReady: function(){
+          this._initCanvas();
+        },
+
+        set: function() {
+
+        },
+
+        // TO DO: animate!
+        animate: function() {
+          // this.sliderValue = this.eqNode.frequency.value;
+        },
+
+        dispose: function() {
+          var nodes = ['output', 'eqNode'];
+          for (var i = 0; i < nodes.length; i++) {
+            try {
+              var node = self[nodes[i]];
+              node.disconnect();
+              node = null;
+            } catch(e) { }
+          }
+        },
+
+        setChanged: function() {
+          this.drawWaveShape();
+        },
+
+        drawWaveShape: function() {
+          var self = this;
+          var sketch = self._p5;
+          sketch.draw();
+        },
+
+        _initCanvas: function() {
+          var self = this;
+
+          self._sketch = function(sketch) {
+
+            sketch.setup = function() {
+              sketch.cnv = sketch.createCanvas(255, 255);
+              sketch.background(255,255,0);
+              sketch.noFill();
+              sketch.noLoop();
+            };
+
+            sketch.draw = function() {
+              var peaks = calcBiquad(self.filterType, self.filterFreq, self.Q, self.filterGain, self.plotMode);
+
+              sketch.background(70,100,0);
+              sketch.strokeWeight(2);
+              sketch.stroke(255, 255, 255);
+
+              // draw curve
+              sketch.beginShape();
+              for (var i = 0; i < peaks.length; i++) {
+                var x = sketch.map(i, 0, peaks.length, 0, sketch.width);
+                var y = sketch.map(peaks[i][1], self.plotGainMin, self.plotGainMax, sketch.height, 0);
+                sketch.vertex(x, y);
+              }
+              sketch.endShape();
+
+              // draw filter node
+              var x = sketch.map(Math.log(self.filterFreq), Math.log(20), Math.log(audioContext.sampleRate/2), 0, sketch.width);
+              var y = sketch.map(self.filterGain, self.plotGainMin, self.plotGainMax, sketch.height, 0);
+              sketch.ellipse(x, y, sketch.width/10, sketch.height/10);
+            };
+
+            sketch.onresize = function() {
+              var compStyle = getComputedStyle(self);
+              var w = Number(compStyle.width.split('px')[0]);
+              var h = Number(compStyle.height.split('px')[0]);
+              sketch.resizeCanvas(w, h);
+            };
+
+          };
+
+          self._p5 = new p5(self._sketch, self.$.canvas_container); 
+        },
+
+        resize: function() {
+          this._p5.onresize();
+        },
+
+        filterFreqChanged: function() {
+          this._p5.draw();
+        },
+
+        //////////////////////
+        // mouse events
+        mouseUp: function(e) {
+          var self = this;
+          self._dragging = false;
+        },
+
+        mouseDown: function(e) {
+          var self = this;
+          self._dragging = true;
+        },
+
+        mouseDragged: function(e) {
+          var self = this;
+
+          if (self._dragging) {
+            var freq;
+            var mX = self._p5.mouseX;
+
+            if (self.plotMode === 'linear') {
+              freq = map(mX, 0, self._p5.width, 20, audioContext.sampleRate/2);
+            } else {
+              // scale values logarithmically: http://stackoverflow.com/questions/846221/logarithmic-slider
+              var minp = 0;
+              var maxp = self._p5.width;
+
+              var minv = Math.log(20);
+              var maxv = Math.log(audioContext.sampleRate/2);
+
+              // calculate adjustment factor
+              var scale = (maxv-minv) / (maxp-minp);
+              freq = Math.exp(minv + scale*(mX-minp));
+            }
+              console.log(freq);
+
+            freq = constrain(freq, 20, audioContext.sampleRate/2);
+          }
+
+          if (typeof(freq) !== 'undefined') {
+            self.filterFreq = freq;
+          }
+
+        },
+
+        mouseEnter: function(e) {
+          // var self = this;
+          // self._dragging = false;
+        },
+
+        mouseLeave: function(e) {
+          var self = this;
+          self._dragging = false;
+        }
+
+      });
+
+    })();
+  </script>
+</polymer-element>
