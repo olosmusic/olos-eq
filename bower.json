@@ -1,0 +1,13 @@
+{
+  "name": "olos-eq",
+  "version": "0.0.0",
+  "license": "MIT",  
+  "main": "olos-eq.html",
+  "dependencies": {
+    "polymer": "Polymer/polymer#~0.5.5",
+    "core-input": "Polymer/core-input"
+  },
+  "devDependencies": {
+    "web-component-tester": "Polymer/web-component-tester#^2.2.6"
+  }
+}

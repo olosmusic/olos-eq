@@ -3,7 +3,7 @@
     Biquad coefficient calculator
     copyright 2010-2013 Nigel Redmon
     http://www.earlevel.com/main/2013/10/13/biquad-calculator-v2/
-    Open Source policy: http://www.earlevel.com/main/2013/03/03/about-source-code-examples/
+    Source code policy: http://www.earlevel.com/main/2013/03/03/about-source-code-examples/
 */
 
 // function drawIt_biquad2() {
