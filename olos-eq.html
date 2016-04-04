@@ -1,7 +1,14 @@
 <link rel="import" href="../polymer/polymer.html">
 <link rel="import" href="../paper-input/paper-input.html">
+<link rel="import" href="../paper-dropdown-menu/paper-dropdown-menu.html">
+<link rel="import" href="../paper-menu/paper-menu.html">
+<link rel="import" href="../paper-item/paper-item.html">
+
+<link rel="import" href="../olos-param/olos-param.html">
+
 <!--
-olos-eq is an eq
+olos-eq is a wrapper for the Web Audio API biquad filter node.
+
 ##### Example
 
 
@@ -14,16 +21,28 @@ olos-eq is an eq
   <link rel="import" type="css" href="olos-eq.css">
   <template>
 
-    <div class="controls">
-      <paper-input label="Freq (Hz)" type="number" preventinvalidinput="" committedValue="{{filterFreq}}" value="{{filterFreq}}"></paper-input>
-      <paper-input id="q-slider" label="Q" type="number" preventinvalidinput="" committedValue="{{Q}}" value="{{Q}}" max="[[qMin]]" min="[[qMax]]" step="0.1"></paper-input>
-      <paper-input label="Type" type="string"></paper-input>
+    <div class="olos-container">
+      <div class="controls">
+        <paper-input label="Freq (Hz)" id="freqSlider" type="number" preventinvalidinput="" committedValue="{{filterFreq}}" value="{{filterFreq}}"></paper-input>
+        <paper-input id="qSlider" label="Q" type="number" preventinvalidinput="" committedValue="{{Q}}" value="{{Q}}" max="[[qMin]]" min="[[qMax]]" step="0.1"></paper-input>
+
+        <paper-dropdown-menu id="filter-type-drop" label="Filter Type" icon="menu" class="dropdown-trigger">
+          <paper-menu selected="[[filterType]]" on-iron-select="setType" attr-for-selected="label" class="menu dropdown-content">
+              <paper-item label="lowpass"> lowpass </paper-item>
+              <paper-item label="highpass"> highpass </paper-item>
+              <paper-item label="bandpass"> bandpass </paper-item>
+              <paper-item label="notch"> notch </paper-item>
+          </paper-menu>
+        </paper-dropdown-menu>
+
+      </div>
+
+      <div id="canvas_container" on-mousedown="mouseDown" on-mouseleave="mouseLeave" on-mouseenter="mouseEnter" on-mouseup="mouseUp" on-mousemove="mouseDragged">
+      </div>
+
+      <olos-param id="frequencyParam"></olos-param>
+      <olos-param id="filterQParam"></olos-param>
     </div>
-
-    <div id="canvas_container" on-mousedown="mouseDown" on-mouseleave="mouseLeave" on-mouseenter="mouseEnter" on-mouseup="mouseUp" on-mousemove="mouseDragged">
-
-    </div>
-
   </template>
   <script src="biquads.js"></script>
   <script>
@@ -46,7 +65,7 @@ olos-eq is an eq
           },
           qMax: {
             type: Number,
-            value: 36
+            value: 64
           },
           // p5 sketch
           _sketch: { value: null },
@@ -60,21 +79,19 @@ olos-eq is an eq
             type: Number,
             value: 1
           },
-          filterQParam: { notify: true },
           filterType: {
             type: String,
-            value: 'lowpass',
-            observer: 'filterTypeChanged'
+            value: 'lowpass'
+            // observer: 'filterTypeChanged'
           },
           frequencyParam: {
-            type: Array,
-            value: function () {
-              return [];
-            },
-            notify: true,
-            observer: 'frequencyParamChanged'
+            value: null,
+            notify: true
           },
-          gainParam: { notify: true },
+          filterQParam: {
+            value: null,
+            notify: true
+          },
           // inputs and outputs
           inputAudio: {
             value: null,
@@ -100,7 +117,7 @@ olos-eq is an eq
           publicMethods: {
             type: Array,
             value: function () {
-              return ['set'];
+              return ['set', 'freqUpdate'];
             }
           },
           rootfolder: {
@@ -113,20 +130,63 @@ olos-eq is an eq
           var self = this;
           self._audioContext = audioContext;
           self.biquad = self.inputAudio = self.output = audioContext.createBiquadFilter();
+          self._initUI();
+          self._initParams();
           self.set();
         },
         attached: function() {
           this._initCanvas();
         },
+
+        _initUI: function() {
+          this.freqSlider = this.$.freqSlider;
+          this.qSlider = this.$.qSlider;
+        },
+        // set audioParams for olos-params
+        // TO DO: generate these automatically ?
+        _initParams: function () {
+          var self = this;
+          self.frequencyParam = this.$.frequencyParam;
+          self.filterQParam = this.$.filterQParam;
+          self.frequencyParam.scope = self;
+          self.frequencyParam.callback = function(a, b) {
+            self.freqUpdate(a, b)
+          };
+          self.filterQParam.scope = self;
+          self.filterQParam.callback = function(a, b) {
+            self.filterQUpdate(a, b)
+          };
+          self.filterQParam.audioParam = self.biquad.Q;
+          self.frequencyParam.audioParam = self.biquad.frequency;
+        },
+        freqUpdate: function() {
+          var values = arguments[0];
+          var time = arguments[1];
+
+          for (var i = 0; i < values.length; i++) {
+            if (values[i] > 0) {
+
+              // scale frequency according to the key olos is in
+              this.freqSlider.value = olos.scaleStep(i);
+
+              // apply new frequency to this oscillatorNode
+              this.biquad.frequency.setValueAtTime(this.filterFreq, time);
+            }
+          }
+
+        },
+        filterQUpdate: function() {
+          var values = arguments[0];
+          var time = arguments[1];
+          console.log(values);
+        },
+
         set: function () {
           // this.filterFreq = 200;
-          this.filterType = 'lowpass';
+          // this.filterType = 'lowpass';
           this.Q = 10;
           this.filterGain = 1;
           this.plotMode = 'logarithmic';
-        },
-        // TO DO: animate!
-        animate: function () {
         },
         // this.sliderValue = this.eqNode.frequency.value;
         dispose: function () {
@@ -219,9 +279,16 @@ olos-eq is an eq
             this._p5.draw();
           }
         },
-        filterTypeChanged: function () {
-          this.set('biquad.type', this.filterType);
+        setType: function(e) {
+          if (!this.biquad) return;
+          var sel = e.target.selected;
+          this.filterType = sel;
+          this.biquad.type = this.filterType;
+          this._p5.draw();
         },
+        // filterTypeChanged: function () {
+        //   this.set('biquad.type', this.filterType);
+        // },
         frequencyParamChanged: function () {
           if (this.frequencyParam[this.frequencyParam.length - 1] instanceof AudioNode) {
             this.modulator = this.frequencyParam[this.frequencyParam.length - 1];
@@ -281,7 +348,6 @@ olos-eq is an eq
           }
           if (typeof freq !== 'undefined') {
             self.filterFreq = freq;
-
             self.Q = q;
           }
         },
